@@ -12,7 +12,14 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v3
         with:
-          lfs: true   # Enable Git LFS checkout
+          lfs: true
+          fetch-depth: 0   # full history
+
+      - name: Setup Git LFS
+        run: |
+          git lfs install
+          git lfs fetch --all
+          git lfs checkout
 
       - name: Push to Hugging Face Space
         env:
