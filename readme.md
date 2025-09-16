@@ -1,0 +1,2 @@
+## Project Description
+Develop a deep learning model that can detect pneumonia (or other lung diseases) from chest X-ray images. The system should classify whether an image is **Normal** or **Pneumonia** and provide visual explanations for predictions.
