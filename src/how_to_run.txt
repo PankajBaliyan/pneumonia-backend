@@ -1,0 +1,11 @@
+-> how to run app:
+uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+
+-> build docker image:
+docker build -t pneumonia-api .
+
+-> run docker image:
+docker run -p 8000:8000 pneumonia-api
+
+-> test docker on web:
+http://localhost:8000/docs

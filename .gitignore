@@ -1,0 +1,69 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.manifest
+*.spec
+
+# Jupyter Notebooks
+.ipynb_checkpoints
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+.env/
+
+# PyCharm
+.idea/
+
+# VS Code
+.vscode/
+
+# Data files
+*.csv
+*.tsv
+*.xls
+*.xlsx
+*.h5
+*.hdf5
+*.parquet
+*.db
+*.sqlite
+*.log
+
+# Model files
+*.ckpt
+*.pth
+*.pt
+*.pb
+*.h5
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Pip
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Others
+*.tmp
+*.bak
+
+# Node.js / React
+node_modules/
+
+# Datasets
+input/chest-xray-pneumonia
+
+# Models
+models/resnet_pneumonia.keras
+models/resnet_pneumonia_savedmodel
