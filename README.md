@@ -1,11 +1,11 @@
 ---
-title: {{title}}
-emoji: {{emoji}}
-colorFrom: {{colorFrom}}
-colorTo: {{colorTo}}
-sdk: {{sdk}}
-sdk_version: "{{sdkVersion}}"
-app_file: app.py
+title: Pneumonia Detection API
+emoji: 🫁
+colorFrom: blue
+colorTo: green
+sdk: docker
+sdk_version: 1.0.0
+app_file: src/main.py
 pinned: false
 ---
 
