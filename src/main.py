@@ -85,6 +85,10 @@ def startup_event():
         print("Model warmup failed:", e)
 
 # --- Prediction endpoint ---
+@app.get("/")
+async def root():
+    return {"message": "Pneumonia Detection API is running"}
+
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
     if file.content_type.split("/")[0] != "image":
