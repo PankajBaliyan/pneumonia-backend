@@ -1,10 +1,11 @@
 ---
-title: Pneumonia Detection API
-emoji: 🫁
-colorFrom: blue
-colorTo: green
-sdk: docker
-app_file: src/main.py
+title: {{title}}
+emoji: {{emoji}}
+colorFrom: {{colorFrom}}
+colorTo: {{colorTo}}
+sdk: {{sdk}}
+sdk_version: "{{sdkVersion}}"
+app_file: app.py
 pinned: false
 ---
 
