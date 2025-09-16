@@ -32,7 +32,6 @@ ENV/
 *.tsv
 *.xls
 *.xlsx
-*.h5
 *.hdf5
 *.parquet
 *.db
@@ -44,7 +43,7 @@ ENV/
 *.pth
 *.pt
 *.pb
-*.h5
+#*.h5 # Uncomment if you want to ignore all .h5 files
 
 # OS files
 .DS_Store
