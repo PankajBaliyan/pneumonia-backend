@@ -1,25 +1,27 @@
 import io
+import cv2
 import base64
 import numpy as np
-import cv2
 from PIL import Image
-from fastapi import FastAPI, File, UploadFile, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 import tensorflow as tf
+from starlette.responses import StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, File, UploadFile, HTTPException
 
 app = FastAPI(title="Pneumonia Detection API")
 
-# Allow CORS from localhost:3000 (React dev). Add your production origin later.
+# Allow CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:5173", "http://127.0.0.1:5173", "https://pneumoai.pankajdev.in"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Label", "X-Probability"]
 )
 
-MODEL_PATH = "models/resnet_pneumonia.h5"  # or models/resnet_pneumonia.h5
+# Define: model path, last convolutional layer name
+MODEL_PATH = "models/resnet_pneumonia.h5"
 LAST_CONV_LAYER = "conv5_block3_out"  # if you used ResNet50 earlier
 
 # --- Utility functions ---
@@ -101,23 +103,27 @@ async def predict(file: UploadFile = File(...)):
     orig_cv2 = cv2.cvtColor(np.array(pil_img.convert("RGB")), cv2.COLOR_RGB2BGR)
     img_array = preprocess_pil_image(pil_img)
 
-    # Prediction (probability of class 1 (pneumonia) in your training)
+    # Prediction
     preds = model.predict(img_array)
-    prob = float(preds[0][0]) if preds.shape[-1] == 1 else float(preds[0][1])  # handle binary-output model
+    prob = float(preds[0][0]) if preds.shape[-1] == 1 else float(preds[0][1])
     label = "Pneumonia" if prob >= 0.5 else "Normal"
 
     # Grad-CAM
     try:
         heatmap = make_gradcam_heatmap(img_array, model, LAST_CONV_LAYER)
         overlay = overlay_heatmap_on_image(orig_cv2, heatmap)
-        heatmap_b64 = cv2_to_base64_png(overlay)
-    except Exception as e:
-        # If grad-cam fails, still return prediction without heatmap
-        heatmap_b64 = None
-        print("Grad-CAM error:", e)
 
-    return JSONResponse({
-        "label": label,
-        "probability": prob,
-        "heatmap_base64": heatmap_b64
-    })
+        # Encode overlay as PNG in memory
+        _, buffer = cv2.imencode(".png", overlay)
+        img_bytes = io.BytesIO(buffer.tobytes())
+
+        # Send both metadata + image back using headers
+        headers = {
+            "X-Label": label,
+            "X-Probability": str(prob)
+        }
+
+        return StreamingResponse(img_bytes, media_type="image/png", headers=headers)
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Grad-CAM error: {e}")
