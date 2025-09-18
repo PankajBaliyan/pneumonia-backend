@@ -10,33 +10,42 @@ from fastapi import FastAPI, File, UploadFile, HTTPException
 
 app = FastAPI(title="Pneumonia Detection API")
 
-# Allow CORS
+# CORS configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:5173", "http://127.0.0.1:5173", "https://pneumoai.pankajdev.in"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "https://pneumoai.pankajdev.in",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-Label", "X-Probability"]
+    expose_headers=["X-Label", "X-Probability"],
 )
 
-# Define: model path, last convolutional layer name
+# Model configuration
 MODEL_PATH = "models/resnet_pneumonia.h5"
-LAST_CONV_LAYER = "conv5_block3_out"  # if you used ResNet50 earlier
+LAST_CONV_LAYER = "conv5_block3_out"
 
-# --- Utility functions ---
+
+# ---------------- Utility Functions ----------------
 def load_model():
-    # prefer SavedModel; tf.keras.models.load_model works with .h5 and SavedModel
-    model = tf.keras.models.load_model(MODEL_PATH)
-    return model
+    """Load trained model from file."""
+    return tf.keras.models.load_model(MODEL_PATH)
 
-def preprocess_pil_image(pil_img, target_size=(224,224)):
+
+def preprocess_pil_image(pil_img, target_size=(224, 224)):
+    """Resize and normalize PIL image for model input."""
     pil_img = pil_img.convert("RGB").resize(target_size)
     arr = np.array(pil_img).astype("float32") / 255.0
-    arr = np.expand_dims(arr, axis=0)  # shape (1, H, W, 3)
-    return arr
+    return np.expand_dims(arr, axis=0)
+
 
 def make_gradcam_heatmap(img_array, model, last_conv_layer_name, pred_index=None):
+    """Generate Grad-CAM heatmap for model predictions."""
     grad_model = tf.keras.models.Model(
         [model.inputs], [model.get_layer(last_conv_layer_name).output, model.output]
     )
@@ -49,80 +58,76 @@ def make_gradcam_heatmap(img_array, model, last_conv_layer_name, pred_index=None
 
     grads = tape.gradient(class_channel, conv_outputs)
     pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2))
-    conv_outputs = conv_outputs[0]  # shape (h, w, channels)
+    conv_outputs = conv_outputs[0]
 
-    # Weighted combination of activation maps
     heatmap = tf.reduce_sum(tf.multiply(conv_outputs, pooled_grads), axis=-1)
-
-    # ReLU & normalize
     heatmap = tf.maximum(heatmap, 0)
+
     max_val = tf.reduce_max(heatmap)
     if max_val == 0:
         return np.zeros_like(heatmap.numpy())
-    heatmap /= max_val
-    return heatmap.numpy()
+
+    return (heatmap / max_val).numpy()
+
 
 def overlay_heatmap_on_image(original_img_cv2, heatmap, alpha=0.4):
+    """Overlay heatmap on original image (OpenCV BGR format)."""
     heatmap_resized = cv2.resize(heatmap, (original_img_cv2.shape[1], original_img_cv2.shape[0]))
     heatmap_uint8 = np.uint8(255 * heatmap_resized)
     heatmap_color = cv2.applyColorMap(heatmap_uint8, cv2.COLORMAP_JET)
-    superimposed = cv2.addWeighted(original_img_cv2, 1 - alpha, heatmap_color, alpha, 0)
-    return superimposed
+    return cv2.addWeighted(original_img_cv2, 1 - alpha, heatmap_color, alpha, 0)
+
 
 def cv2_to_base64_png(cv2_img):
+    """Convert OpenCV image to base64-encoded PNG."""
     _, buffer = cv2.imencode(".png", cv2_img)
-    b64 = base64.b64encode(buffer).decode("utf-8")
-    return b64
+    return base64.b64encode(buffer).decode("utf-8")
 
-# --- Load model at startup ---
+
+# ---------------- Startup ----------------
 @app.on_event("startup")
 def startup_event():
+    """Load and warmup model at application startup."""
     global model
     model = load_model()
-    # Warmup with a zero input to reduce first-request latency
     dummy = np.zeros((1, 224, 224, 3), dtype=np.float32)
     try:
         _ = model.predict(dummy)
     except Exception as e:
         print("Model warmup failed:", e)
 
-# --- Prediction endpoint ---
+
+# ---------------- API Endpoints ----------------
 @app.get("/")
 async def root():
+    """Health check endpoint."""
     return {"message": "Pneumonia Detection API is running"}
+
 
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
+    """Predict pneumonia presence from chest X-ray image."""
     if file.content_type.split("/")[0] != "image":
         raise HTTPException(status_code=400, detail="File must be an image.")
 
     contents = await file.read()
     pil_img = Image.open(io.BytesIO(contents))
 
-    # keep a copy of original for overlay (use cv2 BGR)
     orig_cv2 = cv2.cvtColor(np.array(pil_img.convert("RGB")), cv2.COLOR_RGB2BGR)
     img_array = preprocess_pil_image(pil_img)
 
-    # Prediction
     preds = model.predict(img_array)
     prob = float(preds[0][0]) if preds.shape[-1] == 1 else float(preds[0][1])
     label = "Pneumonia" if prob >= 0.5 else "Normal"
 
-    # Grad-CAM
     try:
         heatmap = make_gradcam_heatmap(img_array, model, LAST_CONV_LAYER)
         overlay = overlay_heatmap_on_image(orig_cv2, heatmap)
 
-        # Encode overlay as PNG in memory
         _, buffer = cv2.imencode(".png", overlay)
         img_bytes = io.BytesIO(buffer.tobytes())
 
-        # Send both metadata + image back using headers
-        headers = {
-            "X-Label": label,
-            "X-Probability": str(prob)
-        }
-
+        headers = {"X-Label": label, "X-Probability": str(prob)}
         return StreamingResponse(img_bytes, media_type="image/png", headers=headers)
 
     except Exception as e:
