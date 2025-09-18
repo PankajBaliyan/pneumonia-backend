@@ -1,12 +1,14 @@
-import io
-import cv2
 import base64
+import io
+
+import cv2
 import numpy as np
-from PIL import Image
 import tensorflow as tf
-from starlette.responses import StreamingResponse
-from fastapi.middleware.cors import CORSMiddleware
+from PIL import Image
 from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from starlette.responses import StreamingResponse
 
 app = FastAPI(title="Pneumonia Detection API")
 
@@ -28,6 +30,7 @@ app.add_middleware(
 
 # Model configuration
 MODEL_PATH = "models/resnet_pneumonia.h5"
+XRAY_MODEL_PATH = "models/xray_filter.h5"
 LAST_CONV_LAYER = "conv5_block3_out"
 
 
@@ -36,13 +39,17 @@ def load_model():
     """Load trained model from file."""
     return tf.keras.models.load_model(MODEL_PATH)
 
+def load_xray_filter_model():
+    """Load trained model from file."""
+    global xray_filter_model
+    xray_filter_model = tf.keras.models.load_model(XRAY_MODEL_PATH)
+
 
 def preprocess_pil_image(pil_img, target_size=(224, 224)):
     """Resize and normalize PIL image for model input."""
     pil_img = pil_img.convert("RGB").resize(target_size)
     arr = np.array(pil_img).astype("float32") / 255.0
     return np.expand_dims(arr, axis=0)
-
 
 def make_gradcam_heatmap(img_array, model, last_conv_layer_name, pred_index=None):
     """Generate Grad-CAM heatmap for model predictions."""
@@ -69,7 +76,6 @@ def make_gradcam_heatmap(img_array, model, last_conv_layer_name, pred_index=None
 
     return (heatmap / max_val).numpy()
 
-
 def overlay_heatmap_on_image(original_img_cv2, heatmap, alpha=0.4):
     """Overlay heatmap on original image (OpenCV BGR format)."""
     heatmap_resized = cv2.resize(heatmap, (original_img_cv2.shape[1], original_img_cv2.shape[0]))
@@ -77,12 +83,10 @@ def overlay_heatmap_on_image(original_img_cv2, heatmap, alpha=0.4):
     heatmap_color = cv2.applyColorMap(heatmap_uint8, cv2.COLORMAP_JET)
     return cv2.addWeighted(original_img_cv2, 1 - alpha, heatmap_color, alpha, 0)
 
-
 def cv2_to_base64_png(cv2_img):
     """Convert OpenCV image to base64-encoded PNG."""
     _, buffer = cv2.imencode(".png", cv2_img)
     return base64.b64encode(buffer).decode("utf-8")
-
 
 # ---------------- Startup ----------------
 @app.on_event("startup")
@@ -90,6 +94,7 @@ def startup_event():
     """Load and warmup model at application startup."""
     global model
     model = load_model()
+    load_xray_filter_model()
     dummy = np.zeros((1, 224, 224, 3), dtype=np.float32)
     try:
         _ = model.predict(dummy)
@@ -108,7 +113,14 @@ async def root():
 async def predict(file: UploadFile = File(...)):
     """Predict pneumonia presence from chest X-ray image."""
     if file.content_type.split("/")[0] != "image":
-        raise HTTPException(status_code=400, detail="File must be an image.")
+        return JSONResponse(
+            status_code=400,
+            content={
+                "data": None,
+                "status": 0,
+                "message": "File must be an image."
+            }
+        )
 
     contents = await file.read()
     pil_img = Image.open(io.BytesIO(contents))
@@ -116,6 +128,19 @@ async def predict(file: UploadFile = File(...)):
     orig_cv2 = cv2.cvtColor(np.array(pil_img.convert("RGB")), cv2.COLOR_RGB2BGR)
     img_array = preprocess_pil_image(pil_img)
 
+    # Step 1: Check if it’s an X-ray
+    xray_pred = xray_filter_model.predict(img_array)[0][0]
+    if xray_pred < 0.5:   # threshold
+        return JSONResponse(
+            status_code=400,
+            content={
+                "data": None,
+                "status": 0,
+                "message": "Not a chest X-ray."
+            }
+        )
+
+    # Step 2: Run pneumonia prediction
     preds = model.predict(img_array)
     prob = float(preds[0][0]) if preds.shape[-1] == 1 else float(preds[0][1])
     label = "Pneumonia" if prob >= 0.5 else "Normal"
