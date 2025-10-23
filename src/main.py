@@ -1,6 +1,5 @@
 import base64
 import io
-
 import cv2
 import numpy as np
 import tensorflow as tf
